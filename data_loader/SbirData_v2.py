@@ -8,6 +8,7 @@ import numpy as np
 from PIL import Image
 
 
+
 class SbirData_v2(Dataset):
     def __init__(self, root_path, obj='shoes', crop_size=225, edge=False):
 

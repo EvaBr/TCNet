@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 import argparse
 from models import *
@@ -15,9 +16,9 @@ def str2bool(s):
 # get parameters
 def get_parameter():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--obj', type=str, default='shoes')
+    parser.add_argument('--obj', type=str, default='bf_shg')
     parser.add_argument('--batch_size', type=int, default=16)
-    parser.add_argument('--epoch_sep', type=int, default=20)
+    parser.add_argument('--epoch_sep', type=int, default=10)
     parser.add_argument('--flag', type=str, default='sbir')
     parser.add_argument('--data_root', type=str, default='data/QUML_v2')
 
@@ -36,10 +37,18 @@ def get_parameter():
     parser.add_argument('--lr', type=float, default=0.0001)
     parser.add_argument('--weight_decay', type=float, default=0.0005)
 
+    parser.add_argument('--nr_epochs', type=int, default=50)
+    parser.add_argument('--mod1', type=str, default='BF')
+    parser.add_argument('--mod2', type=str, default='SHG')
+    parser.add_argument('--crop_size', type=int, default=225)
+
+
+    #sys.argv = ['train.py', '--model_type=densenet', '--feat_dim=1024', "--loss_type=triplet,softmax,sphere,centre","--loss_ratio=0.15,0.3,0.2,0.0003",'--obj=bf_shg', '--flag=BF_to_SHG', '--mod1=SHG', '--mod2=BF']
+
     config = parser.parse_args()
 
-    config.model_path = os.path.join('logs', 'model', '%s_%s.cpkt'%(config.obj, config.flag))
-    config.log_path = os.path.join('logs', 'log', '%s_%s.txt'%(config.obj, config.flag))
+    config.model_path = os.path.join('logs', 'models', config.flag)
+    config.log_path = os.path.join('logs', '%s.txt'%(config.flag))
     config.loss_type = config.loss_type.split(',')
     config.loss_ratio = [eval(r) for r in config.loss_ratio.split(',')]
     config.device = device
@@ -89,7 +98,9 @@ def main():
 
     # dataset
 
-    if config.obj.endswith('v2'):
+    if config.obj == 'bf_shg':
+        data = BFandSHG(config.mod1, config.mod2, crop_size=config.crop_size)
+    elif config.obj.endswith('v2'):
         data = SbirData_v2(config.data_root, edge=edge)
     elif config.obj == 'sketchy':
         data = SketchyData(config.data_root, edge=edge)
@@ -118,7 +129,7 @@ def main():
             print('loading ...')
             model.load_state_dict(torch.load(config.model_path))
         train(model, data, config)
-    elif config.phase.startswith('test'):
+    elif config.phase.startswith('test'):  #TODO: TESTING
         print('testing ...')
 
         accu, accu_complex= test(model, data, config, verbose=True)
@@ -181,6 +192,7 @@ def train(model, data, config=None):
     print(losses)
 
     # data loader
+    print(f"batchsize: {config.batch_size}, nr.images: {len(data)} ")
     loader = data.loader(batch_size=config.batch_size, num_workers=config.batch_size//4, shuffle=True)
 
     # optimizor
@@ -190,6 +202,7 @@ def train(model, data, config=None):
         opts['net'] = torch.optim.SGD(model.parameters(), lr=0.001, momentum=0.9, weight_decay=decay)
     else:
         opts['net'] = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=decay)
+        
     if 'sphere' in losses.keys():
         opts['sphere'] = torch.optim.Adam(s_loss.parameters(), lr=lr, weight_decay=decay)
     if 'softmax' in losses.keys():
@@ -205,14 +218,14 @@ def train(model, data, config=None):
 
 
     # log
-    f = open(config.log_path, 'a+')
+    fajl = open(config.log_path, 'a')
     best_accu = {}
 
     # training
-    for epoch in range(2000):
+    for epoch in range(config.nr_epochs):
         for i, [skts, img1s, img2s, idxs, attrs] in enumerate(loader):
-            print(skts.shape, img1s.shape, img2s.shape, skts.min(), skts.max(), img1s.min(), img1s.max())
-            exit(0)
+           # print(skts.shape, img1s.shape, img2s.shape, skts.min(), skts.max(), img1s.min(), img1s.max())
+            #exit(0)
 
             skts, img1s, img2s, idxs, attrs = skts.to(device), img1s.to(device), img2s.to(device), idxs.to(device), attrs.to(device)
 
@@ -243,26 +256,29 @@ def train(model, data, config=None):
             loss.backward()
             for key, opt in opts.items():
                 if key == 'centre':
-                    for param in opt.param_groups:
+                    for param in opt.param_groups: #TODO????
                         # I don't know what is wrong with centre loss
                         continue
                         for p in param['params']:
-                        	p.grad.data *= (1.0/losses[key][0])
+                            p.grad.data *= (1.0/losses[key][0])
                 opt.step()
             
-        info = 'e:{}'.format(epoch+1)
+        info = 'epoch:{}'.format(epoch+1)
         for key in losses.keys():
             info += ', '
-            info += key[0]+'l: '
+            info += key+'_loss: '
             info += '{:.4f}'.format(losses[key][1])
+        info += ', LOSS: {}'.format(sum([ll[1]*ll[0] for ll in losses.values()]))
 
-        print('\r'+info, end='')
+        #print('\r'+info, end='')
+        print(info)
+        fajl.write(info+'\n')
 
-        if (epoch+1) % config.epoch_sep == 0:
+        if (epoch+1) % config.epoch_sep == 0: #they validate on retrieval!!
 
             accu, accu_complex = test(model, data, config, config.test_verbose)
             #best_accu = {}
-            info = config.flag
+            info = 'VALIDATION' #config.flag
 
             if accu:
                 info = info + '\nsimple - '
@@ -281,11 +297,11 @@ def train(model, data, config=None):
                 info = info + '\t{:.4f}'.format(value)
                 
             print('\n' + info)
-            f.write(info+'\n')
-            f.flush()
-
-        torch.save(model.state_dict(), config.model_path)
-
+            fajl.write(info+'\n')
+            #fajl.flush()
+        if (epoch+1)%20==0:
+            torch.save(model.state_dict(), config.model_path+f'_{epoch+1}.pth')
+    fajl.close()
 
 
 

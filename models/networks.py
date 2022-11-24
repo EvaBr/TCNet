@@ -5,14 +5,14 @@ import torch.nn.functional as F
 
 from .densenet import densenet169
 from .model_utils import *
-import pretrainedmodels
+#import pretrainedmodels
 
 class Resnext100(nn.Module):
     def __init__(self, f_dim, pretrained=True, **kwargs):
         super(Resnext100, self).__init__()
 
         model_name = 'se_resnext101_32x4d' # could be fbresnet152 or inceptionresnetv2
-        self.model = pretrainedmodels.__dict__[model_name](num_classes=1000, pretrained='imagenet')
+        self.model = None #pretrainedmodels.__dict__[model_name](num_classes=1000, pretrained='imagenet')
         self.pool = nn.AvgPool2d(kernel_size=7, stride=1, padding=0)
         self.fc = nn.Linear(2048, f_dim, bias=True)
 

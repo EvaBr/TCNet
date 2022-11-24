@@ -3,31 +3,25 @@ import torch
 
 
 def test(model, data, config, verbose=False):
-    config.obj = config.obj.split('_')[0]
+    #config.obj = config.obj.split('_')[0]
 
     if verbose:
         print('test: simple')
 
-    if config.obj in ('shoes', 'chairs') and config.distance in ('sq', 'cos'):
+    if config.obj in ('shoes', 'chairs', 'bf_shg') and config.distance in ('sq', 'cos'):
         accu_simple = test_simple(model, data, config)
 
     else:
-
         if config.obj in ('shoes', 'chairs') and not (config.distance in ('sq', 'cos')):
             sep = 50
-
         if config.obj in ('shoes_v2', 'hairstyle') and config.distance in ('sq', 'cos'):
             sep = 300
-
         if config.obj in ('shoes_v2', 'hairstyle') and not (config.distance in ('sq', 'cos')):
             sep = 10
-
         if config.obj == 'sketchy' and config.distance in ('sq', 'cos'):
             sep = 200
-
         if config.obj == 'sketchy' and not (config.distance in ('sq', 'cos')):
             sep = 1
-
         accu_simple = test_simple_manidata(model, data, config, sep, verbose)
 
 
@@ -38,23 +32,19 @@ def test(model, data, config, verbose=False):
 
     if config.obj in ('shoes', 'chairs') and config.distance in ('sq', 'cos'):
         sep = 50
-
     if config.obj in ('shoes', 'chairs') and not (config.distance in ('sq', 'cos')):
         sep = 5
-
     if config.obj == 'shoes_v2' and config.distance in ('sq', 'cos'):
         sep = 30
-
     if config.obj == 'shoes_v2' and not (config.distance in ('sq', 'cos')):
         sep = 1
-
     if config.obj in ('sketchy', 'hairstyle') and config.distance in ('sq', 'cos'):
         #sep = 10
         sep = 10
-
     if config.obj in ('sketchy', 'hairstyle') and not (config.distance in ('sq', 'cos')):
         sep = 0
 
+    sep = 1
     accu_complex = test_complex_manidata(model, data, config, sep, verbose)
 
     return accu_simple, accu_complex
@@ -109,9 +99,13 @@ def test_simple(model, data, config):
         if not config.fix_bn:
             model.train()
 
+
+    #    print(f"(original) skts: {feat_skts.shape}, imgs: {feat_imgs.shape}")
         # compute distance
         feat_skts = feat_skts.unsqueeze(1).repeat(1, np, 1)
         feat_imgs = feat_imgs.unsqueeze(0).repeat(ns, 1, 1)
+
+    #    print(f"(repeated) skts: {feat_skts.shape}, imgs: {feat_imgs.shape}")
 
         if distance == 'cos':
             res = -torch.nn.functional.cosine_similarity(feat_skts, feat_imgs, dim=2)
@@ -119,16 +113,25 @@ def test_simple(model, data, config):
             res = torch.norm(feat_skts - feat_imgs, dim=2).pow(2)
         else:
             res = distance(feat_skts, feat_imgs)
+    #    print(f"distance size: {res.shape}")
 
     # compute top-1, top-10 accuracy
+  #  print("res:")
+  #  print(res)
     retrieval_idxs = res.sort(dim=1)[1][:,:10]
+ #   print(f"retr.idx: {retrieval_idxs.shape}")
+ #   print(retrieval_idxs)
     test_idxs = test_idxs.type(retrieval_idxs.type())
     accu1 = (retrieval_idxs[:,0] == test_idxs).float().mean().item()
     accu10 = accu1
+    accu5 = accu1
     for i in range(1, 10):
         accu = (retrieval_idxs[:,i] == test_idxs).float().mean().item()
         accu10 += accu
-    return {'top-1':accu1, 'top-10':accu10}
+    for i in range(1, 5):
+        accu = (retrieval_idxs[:,i] == test_idxs).float().mean().item()
+        accu5 += accu
+    return {'top-1':accu1, 'top-5':accu5, 'top-10':accu10}
 
 
 def test_simple_manidata(model, data, config, sep, verbose):
@@ -218,11 +221,15 @@ def test_complex(model, data, config):
     retrieval_idxs = res.sort(dim=1)[1][:,:10]
     test_idxs = test_idxs.type(retrieval_idxs.type())
     accu1 = (retrieval_idxs[:,0] == test_idxs).float().mean().item()
-    accu10 = accu1
-    for i in range(1, 10):
+    accu5 = accu1
+    for i in range(1, 5):
+        accu = (retrieval_idxs[:,i] == test_idxs).float().mean().item()
+        accu5 += accu
+    accu10 = accu5
+    for i in range(5, 10):
         accu = (retrieval_idxs[:,i] == test_idxs).float().mean().item()
         accu10 += accu
-    return {'top-1':accu1, 'top-10':accu10}
+    return {'top-1':accu1, 'top-5':accu5, 'top-10':accu10}
 
 
 def test_complex_manidata(model, data, config, sep, verbose):
@@ -236,7 +243,7 @@ def test_complex_manidata(model, data, config, sep, verbose):
     niter =  ns // sep + int(ns % sep > 0)
 
     curr_idx = 0
-    right1, right10, num, i = 0, 0, 0, 0
+    right1, right5, right10, num, i = 0, 0, 0, 0, 0
     while curr_idx < ns:
 
         n = min(sep, ns - curr_idx)
@@ -250,18 +257,19 @@ def test_complex_manidata(model, data, config, sep, verbose):
                         test_idxs[curr_idx:curr_idx+sep])
         curr_idx += sep
         accu = test_complex(model, data, config)
-        accu1, accu10 = accu['top-1'], accu['top-10']
+        accu1, accu5, accu10 = accu['top-1'], accu['top-5'], accu['top-10']
 
 
         num += n
         right1 += accu1 * n
+        right5 += accu5 * n
         right10 += accu10 * n
         i += 1
         
         if verbose:
-            print('\r%2d/%3d, right1:{:.0f}, right10:{:.0f}, num:%6d'.format(right1, right10) % (i, niter, num),
+            print('\r%2d/%3d, right1:{:.0f}, right5:{:.0f}, right10:{:.0f}, num:%6d'.format(right1, right5, right10) % (i, niter, num),
                   end='')
     if verbose:
         print()
 
-    return {'top-1':right1/num, 'top-10':right10/num}
+    return {'top-1':right1/num, 'top-5':right5/num, 'top-10':right10/num}

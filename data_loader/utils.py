@@ -33,6 +33,8 @@ class crop_gen:
 
     def __call__(self, x, mode='random'):
         size = self.crop_size
+        if size==0:
+            return x
         w = x.size(2)
         if mode == 'center':
             start = (w-size) // 2
